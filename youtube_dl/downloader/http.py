@@ -21,6 +21,9 @@ class HttpFD(FileDownloader):
         url = info_dict['url']
         tmpfilename = self.temp_name(filename)
         stream = None
+        
+        # Printing the Download URL so that it can be used for downloading using any othe Download Managers
+        self.to_screen('\r Downloading From URL : %s .....' % url)
 
         # Do not include the Accept-Encoding header
         headers = {'Youtubedl-no-compression': 'True'}
