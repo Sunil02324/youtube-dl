@@ -5,7 +5,6 @@ import re
 from .common import InfoExtractor
 from ..compat import (
     compat_HTTPError,
-    compat_urllib_parse_urlencode,
     compat_urllib_request,
     compat_urlparse,
 )
@@ -84,18 +83,19 @@ class UdemyIE(InfoExtractor):
         if enroll_url:
             webpage = self._download_webpage(
                 combine_url(base_url, enroll_url),
-                course_id, 'Enrolling in the course')
+                course_id, 'Enrolling in the course',
+                headers={'Referer': base_url})
             if '>You have enrolled in' in webpage:
                 self.to_screen('%s: Successfully enrolled in the course' % course_id)
 
     def _download_lecture(self, course_id, lecture_id):
         return self._download_json(
-            'https://www.udemy.com/api-2.0/users/me/subscribed-courses/%s/lectures/%s?%s' % (
-                course_id, lecture_id, compat_urllib_parse_urlencode({
-                    'fields[lecture]': 'title,description,view_html,asset',
-                    'fields[asset]': 'asset_type,stream_url,thumbnail_url,download_urls,data',
-                })),
-            lecture_id, 'Downloading lecture JSON')
+            'https://www.udemy.com/api-2.0/users/me/subscribed-courses/%s/lectures/%s?'
+            % (course_id, lecture_id),
+            lecture_id, 'Downloading lecture JSON', query={
+                'fields[lecture]': 'title,description,view_html,asset',
+                'fields[asset]': 'asset_type,stream_url,thumbnail_url,download_urls,data',
+            })
 
     def _handle_error(self, response):
         if not isinstance(response, dict):
@@ -142,7 +142,9 @@ class UdemyIE(InfoExtractor):
             self._LOGIN_URL, None, 'Downloading login popup')
 
         def is_logged(webpage):
-            return any(p in webpage for p in ['href="https://www.udemy.com/user/logout/', '>Logout<'])
+            return any(re.search(p, webpage) for p in (
+                r'href=["\'](?:https://www\.udemy\.com)?/user/logout/',
+                r'>Logout<'))
 
         # already logged in
         if is_logged(login_popup):
@@ -151,17 +153,17 @@ class UdemyIE(InfoExtractor):
         login_form = self._form_hidden_inputs('login-form', login_popup)
 
         login_form.update({
-            'email': username.encode('utf-8'),
-            'password': password.encode('utf-8'),
+            'email': username,
+            'password': password,
         })
 
-        request = sanitized_Request(
-            self._LOGIN_URL, urlencode_postdata(login_form))
-        request.add_header('Referer', self._ORIGIN_URL)
-        request.add_header('Origin', self._ORIGIN_URL)
-
         response = self._download_webpage(
-            request, None, 'Logging in as %s' % username)
+            self._LOGIN_URL, None, 'Logging in as %s' % username,
+            data=urlencode_postdata(login_form),
+            headers={
+                'Referer': self._ORIGIN_URL,
+                'Origin': self._ORIGIN_URL,
+            })
 
         if not is_logged(response):
             error = self._html_search_regex(
@@ -193,12 +195,12 @@ class UdemyIE(InfoExtractor):
 
         asset = lecture['asset']
 
-        asset_type = asset.get('assetType') or asset.get('asset_type')
+        asset_type = asset.get('asset_type') or asset.get('assetType')
         if asset_type != 'Video':
             raise ExtractorError(
                 'Lecture %s is not a video' % lecture_id, expected=True)
 
-        stream_url = asset.get('streamUrl') or asset.get('stream_url')
+        stream_url = asset.get('stream_url') or asset.get('streamUrl')
         if stream_url:
             youtube_url = self._search_regex(
                 r'(https?://www\.youtube\.com/watch\?v=.*)', stream_url, 'youtube URL', default=None)
@@ -206,7 +208,7 @@ class UdemyIE(InfoExtractor):
                 return self.url_result(youtube_url, 'Youtube')
 
         video_id = asset['id']
-        thumbnail = asset.get('thumbnailUrl') or asset.get('thumbnail_url')
+        thumbnail = asset.get('thumbnail_url') or asset.get('thumbnailUrl')
         duration = float_or_none(asset.get('data', {}).get('duration'))
 
         formats = []
@@ -305,7 +307,7 @@ class UdemyIE(InfoExtractor):
 
 class UdemyCourseIE(UdemyIE):
     IE_NAME = 'udemy:course'
-    _VALID_URL = r'https?://www\.udemy\.com/(?P<id>[^/?#&]+)'
+    _VALID_URL = r'https?://(?:www\.)?udemy\.com/(?P<id>[^/?#&]+)'
     _TESTS = []
 
     @classmethod
@@ -325,7 +327,7 @@ class UdemyCourseIE(UdemyIE):
             'https://www.udemy.com/api-2.0/courses/%s/cached-subscriber-curriculum-items' % course_id,
             course_id, 'Downloading course curriculum', query={
                 'fields[chapter]': 'title,object_index',
-                'fields[lecture]': 'title',
+                'fields[lecture]': 'title,asset',
                 'page_size': '1000',
             })
 
@@ -334,6 +336,11 @@ class UdemyCourseIE(UdemyIE):
         for entry in response['results']:
             clazz = entry.get('_class')
             if clazz == 'lecture':
+                asset = entry.get('asset')
+                if isinstance(asset, dict):
+                    asset_type = asset.get('asset_type') or asset.get('assetType')
+                    if asset_type != 'Video':
+                        continue
                 lecture_id = entry.get('id')
                 if lecture_id:
                     entry = {

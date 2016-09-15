@@ -2,7 +2,10 @@
 from __future__ import unicode_literals
 
 from .common import InfoExtractor
-from ..utils import smuggle_url
+from ..utils import (
+    smuggle_url,
+    update_url_query,
+)
 
 
 class FOXIE(InfoExtractor):
@@ -16,6 +19,9 @@ class FOXIE(InfoExtractor):
             'title': 'Official Trailer: Gotham',
             'description': 'Tracing the rise of the great DC Comics Super-Villains and vigilantes, Gotham reveals an entirely new chapter that has never been told.',
             'duration': 129,
+            'timestamp': 1400020798,
+            'upload_date': '20140513',
+            'uploader': 'NEWA-FNG-FOXCOM',
         },
         'add_ie': ['ThePlatform'],
     }
@@ -26,11 +32,12 @@ class FOXIE(InfoExtractor):
 
         release_url = self._parse_json(self._search_regex(
             r'"fox_pdk_player"\s*:\s*({[^}]+?})', webpage, 'fox_pdk_player'),
-            video_id)['release_url'] + '&switch=http'
+            video_id)['release_url']
 
         return {
             '_type': 'url_transparent',
             'ie_key': 'ThePlatform',
-            'url': smuggle_url(release_url, {'force_smil_url': True}),
+            'url': smuggle_url(update_url_query(
+                release_url, {'switch': 'http'}), {'force_smil_url': True}),
             'id': video_id,
         }
